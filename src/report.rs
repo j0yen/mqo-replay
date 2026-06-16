@@ -1,6 +1,6 @@
 //! `report` subcommand: summarize diff output and exit non-zero on specified classes.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -37,8 +37,8 @@ impl ReportConfig {
 pub struct ReportSummary {
     /// Total questions replayed.
     pub total: usize,
-    /// Counts per drift class.
-    pub counts: HashMap<String, usize>,
+    /// Counts per drift class (sorted for deterministic serialization).
+    pub counts: BTreeMap<String, usize>,
     /// The worst offenders (first 10 drifted questions with their class).
     pub worst: Vec<WorstOffender>,
     /// Whether the report should exit non-zero (based on fail_on config).
@@ -56,7 +56,7 @@ pub struct WorstOffender {
 /// Generate a report summary from diff rows.
 pub fn generate_report(rows: &[DiffRow], config: &ReportConfig) -> ReportSummary {
     let total = rows.len();
-    let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
 
     for row in rows {
         *counts.entry(row.class.to_string()).or_insert(0) += 1;
