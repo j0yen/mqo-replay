@@ -1,0 +1,125 @@
+{
+  "schema": "autobuilder.intent_card.v1",
+  "prd_source": "/home/jsy/wintermute/autobuilder/PRD-mqo-replay.md",
+  "intent_slug": "mqo-replay",
+  "root_motivation": "Agent behavior is invisible between releases — the planner, binders, and pillar tools can silently change what they do to a given question, and no automated gate will catch it. Replaying logged decisions through the current agent and diffing the output turns each past decision into a regression test, making behavioral drift a first-class CI signal rather than a silent surprise.",
+  "user_persona": "MQO platform engineer who ships changes to mqo-agent or its pillar tools and needs to verify no previously-observed behavior regressed before merging.",
+  "unfakeable_metric": {
+    "name": "ac_passing_count",
+    "lower_is_better": false,
+    "harness_command": "cargo test --workspace 2>&1 | grep -c 'test.*ok'",
+    "target": 8
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "level": "MUST",
+      "description": "`run` extracts every question from a fixture log and produces one fresh record per question via the (mocked) agent subprocess.",
+      "test": "tests/acceptance_ac1.rs::test_run_produces_one_record_per_question"
+    },
+    {
+      "id": "AC2",
+      "level": "MUST",
+      "description": "`diff` against a no-change fixture agent classifies every item `unchanged`.",
+      "test": "tests/acceptance_ac2.rs::test_diff_no_change_all_unchanged"
+    },
+    {
+      "id": "AC3",
+      "level": "MUST",
+      "description": "`diff` against a drifted fixture agent correctly labels at least one each of `plan_drift`, `bind_drift`, and `outcome_drift`, naming the question.",
+      "test": "tests/acceptance_ac3.rs::test_diff_drifted_labels_all_categories"
+    },
+    {
+      "id": "AC4",
+      "level": "MUST",
+      "description": "`value_drift` fires only when the numeric answer moves beyond `--value-tol` and not within it (boundary tested at the tolerance edge).",
+      "test": "tests/acceptance_ac4.rs::test_value_drift_boundary"
+    },
+    {
+      "id": "AC5",
+      "level": "MUST",
+      "description": "`report --fail-on bind_drift,value_drift` exits non-zero when those classes are present and zero when only `plan_drift` is present.",
+      "test": "tests/acceptance_ac5.rs::test_report_fail_on_exit_codes"
+    },
+    {
+      "id": "AC6",
+      "level": "MUST",
+      "description": "Numeric comparison matches `mqo-engine-parity`'s tolerance convention: absolute tolerance by default (1e-6), relative optional; same inputs yield same verdict.",
+      "test": "tests/acceptance_ac6.rs::test_numeric_tolerance_matches_engine_parity"
+    },
+    {
+      "id": "AC7",
+      "level": "MUST",
+      "description": "Determinism: `diff`/`report` output is stable across runs for fixed inputs; no wall-clock leaks into the classification.",
+      "test": "tests/acceptance_ac7.rs::test_determinism"
+    },
+    {
+      "id": "AC8",
+      "level": "MUST",
+      "description": "`serve` answers the replay tool calls; `--help` documents every flag; all tests run cluster-free against bundled fixtures.",
+      "test": "tests/acceptance_ac8.rs::test_serve_and_help"
+    }
+  ],
+  "scope": [
+    "Re-run NL questions from a mqo-decision-log through the current mqo-agent (or a mock) as a subprocess",
+    "Classify per-question deltas into: unchanged, plan_drift, bind_drift, outcome_drift, value_drift",
+    "Render a summary report and exit non-zero on specified drift classes",
+    "Serve run/diff/report as MCP tools via `serve` subcommand",
+    "Run entirely offline against bundled fixture logs and fixture agents"
+  ],
+  "non_goals": [
+    "Not a golden-accuracy benchmark (that is mqo-bench)",
+    "Does not re-run against live warehouses in tests",
+    "Does not auto-fix drift — reports and gates only",
+    "Does not compare against model contract (that is mqo-semantic-regression)"
+  ],
+  "hard_constraints": {
+    "rust_edition": "2021",
+    "target_kind": "cli",
+    "deny_unsafe": true,
+    "msrv": "1.85",
+    "max_deps": null,
+    "additional": {
+      "no_network_in_tests": true,
+      "subprocess_interface": "mqo-agent or any cmd overridable via --agent flag"
+    }
+  },
+  "five_whys_trace": [
+    {
+      "why": 1,
+      "q": "Why build a replay tool instead of relying on existing regression tests?",
+      "a": "Existing tests (mqo-semantic-regression) watch the model contract — grain, PII tags. They do not watch whether the agent's planner calls the same pillars or reaches the same outcome for the same question after a code change."
+    },
+    {
+      "why": 2,
+      "q": "Why does agent behavioral drift matter if the model contract is unchanged?",
+      "a": "A planner change could route the same question through different pillars (bind_drift), switch from 'answered' to 'clarify' (outcome_drift), or return a numerically different value (value_drift) without touching any measure's grain or PII tag."
+    },
+    {
+      "why": 3,
+      "q": "Why not just replay in a unit test within mqo-agent itself?",
+      "a": "mqo-decision-log is the corpus: it captures production decisions across all sessions. A unit test inside mqo-agent only covers what the author anticipated; the log captures the actual question distribution users posed."
+    },
+    {
+      "why": 4,
+      "q": "Why make it a standalone CLI rather than a script?",
+      "a": "CI needs a stable interface: a binary with a structured diff output and exit codes that block a release on bind_drift without requiring CI to parse unstructured logs."
+    },
+    {
+      "why": 5,
+      "q": "Why does this need to be its own repo rather than a module inside mqo-agent?",
+      "a": "It must run against any version of mqo-agent as a subprocess — coupling it inside the agent would create a circular dependency and prevent it from being the independent observer it needs to be."
+    }
+  ],
+  "ambiguities_resolved": [
+    {
+      "question": "What does 'bind_drift' mean exactly — is it the bound measure name or also grain?",
+      "resolution": "bind_drift captures any change to what was bound: measure name, grain, or numeric value field in the decision record. value_drift is the numeric-only sub-case with tolerance."
+    },
+    {
+      "question": "How does the agent subprocess get invoked?",
+      "resolution": "mqo-replay run passes the question as stdin (or --question arg) to the agent subprocess and expects a JSON record on stdout matching DecisionRecord schema. --agent <cmd> overrides the default 'mqo-agent'."
+    }
+  ],
+  "created_at": "2026-06-16T00:00:00Z"
+}
